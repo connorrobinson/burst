@@ -1,0 +1,11 @@
+#!/bin/csh
+
+matlab -nodisplay -singlecompthread -r "job0001; exit"
+
+set tagbase = 'template'
+set p3script = $tagbase'_phase3.py'
+
+mkdir $tagbase
+mkdir 'results'
+
+python $p3script

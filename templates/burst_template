@@ -1,0 +1,137 @@
+#!/bin/csh
+
+#Calculates shoch spectrum for given stellar parameters (M,R,T)
+#and shock parameters (energy flux and filling factor)
+#-----------------------------------------------------------------
+
+#Used for collating
+set jobnum='001'
+
+# give a name to your run (for labels in output files):
+set NAME='gmaur001'
+
+# DISTANCE    in pc
+set DISTANCE='140.0'
+
+# mass and radius in solar units
+set MASS='1.1' 
+set RADIO='1.7'  
+set TSTAR='4350'
+ 
+# BIGF        Energy flux
+set BIGF='1E+10'
+
+# FILLING     filling factor
+set FILLING='0.01'
+
+# RHO        Density
+set RHO='1E-13'
+
+#VELOCITY    velocity of the flow
+set VELOCITY='1E+7'
+
+# Add in a variable for how the WTTS is scaled. Note that this doesn't actually do anything in the code
+#but it does allow collate/shock_create to latch on to it. 
+set SFACTOR='0.2'
+
+# directory where program is are kept:
+set DIRPROG=/project/bu-disks/shared/SHOCK/PROGRAMS
+# directory where data files are kept:
+set DIRDAT=/project/bu-disks/shared/SHOCK/DATAFILES
+
+# file with wtts fluxes
+# flux at stellar radius in erg/cm2/s/A
+set filewtts='gmaur_hbc427_001.dat'
+set template='/projectnb/bu-disks/connorr/burst/templates/template_spectra.dat'
+
+#Set files for cloudy                                                                                                                       
+set BASEPATH='/project/bu-disks/shared/SHOCK/PREPOST/'
+set CTFILE='/project/bu-disks/shared/SHOCK/PREPOST/coolinggrid.txt'
+set COOLTAG='cooling'
+set CLOUDY='/projectnb/bu-disks/connorr/cloudy/c17.00/source/cloudy.exe'
+set OPCFILE='/project/bu-disks/shared/SHOCK/PREPOST/opacitygrid.txt'
+
+#end of data input
+#---------------------------------------------------------------
+
+#DATAFILES
+#files
+set fileblanketing=$DIRDAT/blanketing4_data
+set filedent=$DIRDAT/densidad.dat
+set filehight=$DIRDAT/hight.dat
+set fileauman=$DIRDAT/auman.dat
+set filechiross=$DIRDAT/chiross.dat
+set filetio=$DIRDAT/tio.dat
+set filecow1=$DIRDAT/cow1.dat
+set filecof1=$DIRDAT/cof1.dat
+set filecow2=$DIRDAT/cow2.dat
+set filecof2=$DIRDAT/cof2.dat
+
+#=============================================================================
+#
+# #OBTAIN SHOCK AND PRE-SHOCK FLUXES FOR INPUT TO COLUMNA: interpolaenf
+# #Interpolates in Gullbring's shock models for given M/R
+# set interpolaenf=$DIRPROG/interpolaenf_v2
+#
+# ##Output from interpolaf
+# #shockfile with shock and pre-shock spectra
+# #input to COLUMNA
+#
+# ##interpolates in F for given M/R
+# $interpolaenf << EOD
+# $DIRDAT/shock.
+# $BIGF
+# $MASS
+# $RADIO
+# $NAME
+# EOD
+
+#Call python + cloudy to calculate the preshock and postshock structure
+python -c "import prepost_burst; prepost_burst.wrapper('$MASS', '$RADIO', '$VELOCITY', '$RHO', '$NAME', '$CTFILE', '$OPCFILE', '$BASEPATH', '$COOLTAG', '$CLOUDY')" 
+
+#Set the structure file
+set filestructure=$NAME'_struct.dat'
+
+#----------------------------------------------------------------------------
+#HEATED PHOTOSPHERE CALCULATION: COLUMNA
+set COLUMNA=$DIRPROG/columna15
+
+##Input data for COLUMNA:
+#NLTE=0       =1 calculate NLTE H populations, not yet implemented, leave at 0
+set NLTE='0'
+
+##Output from COLUMNA:
+#fort.30
+#with heated photosphere structure and output spectra of:
+#heated photosphere,pre-shock, photosphere
+#fluxes in Flambda erg/cm3/s)
+
+echo entering shock calculation
+##shock spectrum calculation
+$COLUMNA << EOD
+$NLTE $FILLING 1.5
+$MASS
+$RADIO
+$TSTAR
+$BIGF
+$DISTANCE
+$NAME
+$fileblanketing
+$filedent
+$filehight
+$fileauman
+$filechiross
+$filetio
+$filecow1
+$filecof1
+$filecow2
+$filecof2
+fort40.$NAME
+$filestructure
+$template
+EOD
+ 
+#Collate the finished model
+python -c "import collate; collate.collate('./', './', '$jobnum', '$NAME'.split('$jobnum')[0], shock = True, clob = True, fill = len('$jobnum'))"
+
+exit
