@@ -2692,7 +2692,7 @@ class trial:
         self.Rwtts = Rwtts
         self.Dwtts = Dwtts
     
-def makeSpec(self, spot):
+    def makeSpec(self, spot):
         '''
         PURPOSE:
             Extracts spectra from a simulation + set of accretion shock models given a spot
