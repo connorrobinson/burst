@@ -2602,7 +2602,10 @@ class trial:
                       'B':bandpath + 'Bessel_B-1.txt',\
                       'V':bandpath + 'Bessel_V-1.txt',\
                       'R':bandpath + 'Bessel_R-1.txt',\
-                      'I':bandpath + 'Bessel_I-1.txt'}
+                      'I':bandpath + 'Bessel_I-1.txt',\
+                      'ESPEX_NUV':bandpath + 'synthetic_ESPEX_NUV.dat',\
+                      'ESPEX_O':bandpath + 'synthetic_ESPEX_O.dat',\
+                      'ESPEX_NIR':bandpath + 'synthetic_ESPEX_NIR.dat'}
         
         if band not in filters:
             print('Error in spec2phot: Filter "'+band+'" not currently implemented. Returning...')
@@ -2689,7 +2692,7 @@ class trial:
         self.Rwtts = Rwtts
         self.Dwtts = Dwtts
     
-    def makeSpec(self, spot):
+def makeSpec(self, spot):
         '''
         PURPOSE:
             Extracts spectra from a simulation + set of accretion shock models given a spot
@@ -2924,25 +2927,19 @@ class trial:
 
 def compiler(jobs, outname, path, paramfile, nzeros = 4):
     '''
-
     connector.compiler
-
     PURPOSE:
         Takes all of the collated fits files and combines them into a single EDGE object.
         Returns the object and a list of jobnum vs time.
-
     INPUTS:
         jobs:[array] Job numbers for each frame
         outname:[str] Output name
         path:[str] Output location
         paramfile:[str] Location of the input parameter file
-
     OPTIONAL INPUTS:
         nzeros:[int] Amount of zero padding
-
     AUTHOR:
         Connor Robinson, October 26th, 2018
-
     '''
     
     import EDGE as edge
