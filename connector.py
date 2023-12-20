@@ -26,7 +26,7 @@ from scipy import signal
 
 from tqdm import tqdm
 import math
-
+import h5py
 
 #from sklearn import gaussian_process as gp
 #from sklearn.gaussian_process.kernels import RBF
@@ -64,7 +64,8 @@ def connector(outname, simulation, Tdisk, DISTANCE, TSTAR, RADIUS, n0, tstart, t
               CLOUDY ='/projectnb/bu-disks/connorr/cloudy/c17.00/source/cloudy.exe',\
               OPCFILE ='/project/bu-disks/shared/SHOCK/PREPOST/opacitygrid.txt',\
               LOCALPYTHONPATH = None,\
-              nthreads = None):
+              nthreads = None,\
+              oldmatlab = False):
     
     '''
     connector()
@@ -98,6 +99,7 @@ def connector(outname, simulation, Tdisk, DISTANCE, TSTAR, RADIUS, n0, tstart, t
         CLOUDY:[str] Cloudy executable
         OPCFILE:[str] Location of the opacity file for the shock models
         LOCALPYTHONPATH:[str] Python path if running shock models locally. 
+        oldmatlab:[bool] If true, uses scipy.io.loadmat, which does not work for 7.3 files (newer version uses h5py instead)
         
     AUTHOR:
         Connor Robinson, October 12th, 2018
@@ -110,8 +112,14 @@ def connector(outname, simulation, Tdisk, DISTANCE, TSTAR, RADIUS, n0, tstart, t
     mh = 1.607e-24
     kb = 1.38066e-16
     
-    #Load in the simulation
-    sim = scipy.io.loadmat(simulation)
+    #Load in the simulation. Added a switch to use old version so that it's backwards compatible.
+    if oldmatlab:
+        sim = scipy.io.loadmat(simulation)
+    else:
+        sim = {}
+        f = h5py.File(simulation)
+        for k, v in f.items():
+            sim[k] = np.array(v)
     
     #Set the metallicity
     if composition == 'solar':
@@ -120,17 +128,17 @@ def connector(outname, simulation, Tdisk, DISTANCE, TSTAR, RADIUS, n0, tstart, t
         Z = 0.0134
         mu = (2*X + 3/4*Y + 1/2*Z)**-1
     
-    elif compoition == 'hydrogen':
+    elif composition == 'hydrogen':
         mu = 0.5
     
     else:
         print('Composition type not found. Current options are: "solar" and "hydrogen". Returning...')
         return np.nan
     
-    #Get information from the matlab file
-    rho_code = sim['rho_dump'][:,:-1]
-    u_code = sim['u_dump'][:,:-1]
-    time_code = sim['t_dump'][:-1].flatten()
+    #Get information from the matlab file -- added transpose because this was failing on newer matlab files... Sept 28th, 2023
+    rho_code = sim['rho_dump'][:,:-1].T
+    u_code = sim['u_dump'][:,:-1].T
+    time_code = sim['t_dump'].flatten()
     
     #Do necessary conversinos from code units to physical units
     rho0 = mu * mh * n0
@@ -1151,7 +1159,7 @@ def create_kolmogorav_fixed(Fmax, Fmin, simpath, clusterpath, tagbase, Rstar, Td
     cs = np.sqrt(gamma * kb * Tdisk / (mu * mp))
     
     #Calculate necessary number of cells. Increase by a factor of 10 to be safe.
-    N = 10 * np.ceil(2 * 10**Fmax * (time * 24 * 60 * 60)) + 1 
+    N = int(10 * np.ceil(2 * 10**Fmax * (time * 24 * 60 * 60)) + 1 )
     
     #Generate the turbulence spectrum
     T, sig = kolmogorav(N, Fmin, Fmax)
@@ -1252,7 +1260,7 @@ def create_kolmogorav(simpath, clusterpath, tagbase, Rstar, Rdisk, Tdisk, amplit
     Fmax = np.log10(2.0/(60 * 60)) #Set minimum timescale to 2 hours
     
     #Calculate necessary number of cells. Increase by a factor of 10 to be safe.
-    N = 10 * np.ceil(2 * 10**Fmax * (time * 24 * 60 * 60)) + 1 
+    N = int(10 * np.ceil(2 * 10**Fmax * (time * 24 * 60 * 60)) + 1)
     
     #Generate the turbulence spectrum
     T, sig = kolmogorav(N, Fmin, Fmax)
@@ -1379,7 +1387,7 @@ def getBand(wl, flux, bandfile):
         Convert spectra into photometry point. TRANSMISSION CURVES MUST BE IN NM
     
     INPUTS:
-        wl:[array] Wavelength array IN MICRONS
+        wl:[array] Wavelength array IN ANGSTROMS
         flux:[array] Flux array
         bandfile:[str] File containing the transmission curve IN NM
     
@@ -1391,8 +1399,8 @@ def getBand(wl, flux, bandfile):
     #Load in the transmission window
     trans = np.genfromtxt(bandfile, skip_header = 1)
     
-    wl_t = trans[:,0]/1e3  #microns
-    filt = trans[:,1]      # T/per micron
+    wl_t = trans[:,0] * 1e1  #Angstroms
+    filt = trans[:,1]      # T/per angstrom
     
     filt[filt < 0] =0 
     filt = filt/np.max(filt)
@@ -1792,7 +1800,6 @@ def getM(t, lc, ell, err, tau = 1, showplot = False, plotname = None, percentile
     # plt.ylim(ymin = 0)
     # plt.show()
     
-#    pdb.set_trace()
     
     #Calculate M
     ################################
@@ -2449,8 +2456,15 @@ class trial:
         #Add an empty dictionary to store wtts flux values
         self.wttsflux = {}
         
+        #Add a few parameters from intialization
+        self.modelname = modelname
+        self.nzeros = nzeros
+        self.tablefile = tablefile
+        self.modelpath = modelpath
+        self.paramfile = paramfile 
+        
     
-    def addStrip(self, inc, ftrunc, width, phi0, name, nw = 100, nstrip = 5):
+    def addStrip(self, inc, ftrunc, width, phi0, name, nw = 100, nstrip = 5, g1 = None, g2 = None):
         '''
         addStrip
         
@@ -2460,7 +2474,7 @@ class trial:
         
         INPUTS:
             i:[float] Inclination
-            ftrunc:[float] Truncation radius, written as a fraction of rdisk
+            ftrunc:[float] Truncation radius, written as a fraction of rdisk. Ignored if g1 and g2 are specified
             width:[float] Angular width of strip
             phi0:[float] Phase offset of the strip
             name:[str] Name of the strip. 
@@ -2468,7 +2482,9 @@ class trial:
         OPTIONAL INPUTS:
             nw:[int] Number of cells in each strip. Default is 100
             nstrip:[int] Number of strips. Default is 5. (increase with larger differences between g1 and g2)
-        
+            g1:[float] Angular separation from rotation axis to start of strip
+            g2:[float] Angular separation from rotation axis to extend of strip
+            
         AUTHOR:
             Connor Robinson, Sept 8th, 2020
         '''
@@ -2477,9 +2493,10 @@ class trial:
         t0 = self.time[0]
         phi = ( (phi0 + (self.time - t0)/self.period) % 1) * 360
         
-        #Calculate the upper and lower values of gamma
-        g1 = get_theta(1, self.rdisk, self.GAMMA, Z = 0.05) * 180/np.pi
-        g2 = get_theta(1, ftrunc*self.rdisk, self.GAMMA, Z = 0.05) * 180/np.pi
+        #Calculate the upper and lower values of gamma if they are not specified via ftrunc
+        if g1 == None and g2 == None:
+            g1 = get_theta(1, self.rdisk, self.GAMMA, Z = 0.05) * 180/np.pi
+            g2 = get_theta(1, ftrunc*self.rdisk, self.GAMMA, Z = 0.05) * 180/np.pi
         
         #Break area into multiple strips
         A = []
@@ -2500,7 +2517,6 @@ class trial:
         
         #Add the results to the object
         self.spot[name] = {'A':A, 'Nwidth':nw, 'gamma1':g1, 'gamma2':g2, 'i':inc, 'phi0':phi0, 'phi':phi}
-    
     
     def addSpot(self, inc, alpha, phi0, name, gamma = None):
         '''
@@ -2584,7 +2600,7 @@ class trial:
         
         INPUTS:
             band:[str] Filter bandpass to measure photometry
-            wttsflux:[float] Unscaled flux of the wtts in erg s^-1 cm^-2 (e.g., still at the distance/radius of the WTTS)
+            wttsflux:[float] Unscaled flux of the wtts in erg s^-1 cm^-2 angs^-1 (e.g., still at the distance/radius of the WTTS)
             rwtts:[float] Radius of the wtts in Rsun
             dwtts:[float] Distance to the wtts in pc
             
@@ -2605,7 +2621,14 @@ class trial:
                       'I':bandpath + 'Bessel_I-1.txt',\
                       'ESPEX_NUV':bandpath + 'synthetic_ESPEX_NUV.dat',\
                       'ESPEX_O':bandpath + 'synthetic_ESPEX_O.dat',\
-                      'ESPEX_NIR':bandpath + 'synthetic_ESPEX_NIR.dat'}
+                      'ESPEX_NIR':bandpath + 'synthetic_ESPEX_NIR.dat',\
+                      'u':bandpath + 'SLOAN_SDSS.u.dat',\
+                      'g':bandpath + 'SLOAN_SDSS.g.dat',\
+                      'r':bandpath + 'SLOAN_SDSS.r.dat',\
+                      'i':bandpath + 'SLOAN_SDSS.i.dat',\
+                      'G':bandpath + 'Gaia_G.dat',\
+                      'G_RP':bandpath + 'Gaia_G_RP.dat',\
+                      'G_BP':bandpath + 'Gaia_G_BP.dat'}
         
         if band not in filters:
             print('Error in spec2phot: Filter "'+band+'" not currently implemented. Returning...')
@@ -2619,11 +2642,13 @@ class trial:
         
         phot = []
         for i, t in tqdm(enumerate(self.time)):
-            wave_mic = self.wl/1e4
-            phot.append(getBand(wave_mic, self.model[i,:], bandfile))
+            # wave_mic = self.wl/1e4
+            
+            #Convert model to Flamda units (erg/s/cm^2/A)
+            Flambda_model = self.model[i,:]/self.wl
+            phot.append(getBand(self.wl, Flambda_model, bandfile))
         
         phot = np.array(phot)
-        
         self.lc[band] = phot
         
         #Scale the WTTS photometry point
@@ -2746,6 +2771,8 @@ class trial:
         Rsun = 6.96e10 #cm
         Msun = 2e33 #g
         
+        
+        print('Calculating Mdot this way may be wrong (since A is the projected area)')
         mdot = 8 * np.pi * (self.Rstar*Rsun/self.vel)**2 * (self.spot[spot]['A'] * self.F) * (365 * 24 * 60 * 60)/Msun
         
         med = np.median(self.spot[spot][band])
